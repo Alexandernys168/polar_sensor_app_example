@@ -85,11 +85,18 @@ class DataVM @Inject constructor(
         _state.update { it.copy(measuring = true) }
     }
 
-    fun startGyro() {
-        internalSensorController.startGyroStream()
-        streamType = StreamType.LOCAL_GYRO
+    fun startGyro()
+    {
+        if(_state.value.connected){
 
-        _state.update { it.copy(measuring = true) }
+        }
+        else {
+            internalSensorController.startGyroStream()
+            streamType = StreamType.LOCAL_GYRO
+
+            _state.update { it.copy(measuring = true) }
+        }
+
     }
 
     fun stopDataStream(){

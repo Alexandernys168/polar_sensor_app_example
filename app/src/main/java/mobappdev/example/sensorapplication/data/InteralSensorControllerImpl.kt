@@ -36,6 +36,8 @@ class InternalSensorControllerImpl(
     override val currentLinAccUI: StateFlow<Triple<Float, Float, Float>?>
         get() = _currentLinAccUI.asStateFlow()
 
+    private var _currentLinAcc: Triple<Float,Float,Float>? = null
+
     private var _currentGyro: Triple<Float, Float, Float>? = null
 
     // Expose gyro to the UI on a certain interval
@@ -55,15 +57,39 @@ class InternalSensorControllerImpl(
     private val gyroSensor: Sensor? by lazy {
         sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
     }
+    private val linAccSensor: Sensor? by lazy {
+        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    }
 
+    @OptIn(DelicateCoroutinesApi::class)
     override fun startImuStream() {
         // Todo: implement
-    }
+        if(linAccSensor == null) {
+            Log.e(LOG_TAG, "Accelerometer sensor is not available on this device")
+            return
+        }
+        if(_streamingLinAcc.value) {
+            Log.e(LOG_TAG, "Accelerometer sensor is already streaming")
+            return
+        }
 
+        sensorManager.registerListener(this, linAccSensor, SensorManager.SENSOR_DELAY_UI)
+        GlobalScope.launch(Dispatchers.Main) {
+            _streamingLinAcc.value = true
+            while (_streamingLinAcc.value) {
+                _currentLinAccUI.update { _currentLinAcc }
+                delay(500)
+            }
+        }
+    }
     override fun stopImuStream() {
         // Todo: implement
+        if (_streamingLinAcc.value) {
+            // Unregister the listener to stop receiving gyroscope events (automatically stops the coroutine as well
+            sensorManager.unregisterListener(this, linAccSensor)
+            _streamingLinAcc.value = false
+        }
     }
-
     @OptIn(DelicateCoroutinesApi::class)
     override fun startGyroStream() {
         if (gyroSensor == null) {
@@ -74,10 +100,8 @@ class InternalSensorControllerImpl(
             Log.e(LOG_TAG, "Gyroscope sensor is already streaming")
             return
         }
-
         // Register this class as a listener for gyroscope events
         sensorManager.registerListener(this, gyroSensor, SensorManager.SENSOR_DELAY_UI)
-
         // Start a coroutine to update the UI variable on a 2 Hz interval
         GlobalScope.launch(Dispatchers.Main) {
             _streamingGyro.value = true

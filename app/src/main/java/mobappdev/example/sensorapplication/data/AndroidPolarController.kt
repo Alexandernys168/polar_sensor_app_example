@@ -17,6 +17,7 @@ import com.polar.sdk.api.PolarBleApiDefaultImpl
 import com.polar.sdk.api.errors.PolarInvalidArgument
 import com.polar.sdk.api.model.PolarDeviceInfo
 import com.polar.sdk.api.model.PolarHrData
+import com.polar.sdk.api.model.PolarSensorSetting
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.disposables.Disposable
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +26,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import mobappdev.example.sensorapplication.domain.PolarController
 import java.util.UUID
+import com.polar.sdk.api.model.*
+
+import kotlin.math.atan2
 
 class AndroidPolarController (
     private val context: Context,
@@ -47,12 +51,48 @@ class AndroidPolarController (
         )
     }
 
+
+
+
+
     private var hrDisposable: Disposable? = null
+
+    private var linAccDisposable: Disposable? = null
+
     private val TAG = "AndroidPolarController"
+
+    private val _currentLinAccUI = MutableStateFlow<Triple<Int, Int, Int>?>(null)
+    private val currentLinAccUI: StateFlow<Triple<Int, Int, Int>?>
+        get() = _currentLinAccUI.asStateFlow()
+
+    private var _currentLinAcc= MutableStateFlow<Triple<Int,Int,Int>?>(null)
+
+
+    override val currentLinAcc: StateFlow<Triple<Int, Int, Int>?>
+        get() = _currentLinAcc.asStateFlow()
+
+    private val _elevations = MutableStateFlow<List<ElevationData>?>(emptyList())
+
+    val elevations: StateFlow<List<ElevationData>?>
+        get() = _elevations.asStateFlow()
+
+    // Function to update elevations
+    fun updateElevations(newElevations: List<ElevationData>) {
+        _elevations.value = newElevations
+    }
+
+    private val _linAccList = MutableStateFlow<List<Triple<Int, Int, Int>>>(emptyList())
+    override val linAccList: StateFlow<List<Triple<Int,Int,Int>>>
+        get() = _linAccList.asStateFlow()
+
+
 
     private val _currentHR = MutableStateFlow<Int?>(null)
     override val currentHR: StateFlow<Int?>
         get() = _currentHR.asStateFlow()
+
+
+
 
     private val _hrList = MutableStateFlow<List<Int>>(emptyList())
     override val hrList: StateFlow<List<Int>>
@@ -115,6 +155,70 @@ class AndroidPolarController (
         }
     }
 
+
+    override fun startLinAccStreaming(deviceId: String) {
+        val settings: MutableMap<PolarSensorSetting.SettingType, Int> = mutableMapOf()
+        settings[PolarSensorSetting.SettingType.SAMPLE_RATE] = 52
+        settings[PolarSensorSetting.SettingType.RESOLUTION] = 16
+        settings[PolarSensorSetting.SettingType.RANGE] = 8
+        settings[PolarSensorSetting.SettingType.CHANNELS] = 3
+
+        val polarSensorSetting = PolarSensorSetting(settings)
+
+        var zTanBefore : Double = 0.0
+
+        var offset = 0L
+
+        val isDisposed = linAccDisposable?.isDisposed ?: true
+        if(isDisposed) {
+            _measuring.update { true }
+            linAccDisposable =
+
+                api.startAccStreaming(deviceId,polarSensorSetting )
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(
+                    {linAccData: PolarAccelerometerData ->
+                        for (sample in linAccData.samples) {
+                            val angleZTan = Math.toDegrees(atan2(sample.y.toDouble(), sample.x.toDouble()))
+
+                            val filteredAngleZ = filterEWMA(angleZTan, zTanBefore)
+
+                            // Use filteredAngleZ for further processing or UI updates
+                            Log.d(TAG, "Filtered Angle Z: $filteredAngleZ + TimeStamp: ${sample.timeStamp}")
+
+                            // Update zTanBefore for the next iteration
+                            zTanBefore = filteredAngleZ
+
+                            _elevations.update {
+                                it?.plus(ElevationData(angleZTan.toInt(), sample.timeStamp))
+                            }
+
+
+                        }
+
+                    },
+                    {error: Throwable ->
+                        Log.e(TAG, "Acc stream failed, reaseon $error")
+                    },
+                    {
+                        Log.d(TAG, "Acc stream complete")
+                    }
+                )
+        } else {
+            Log.d(TAG, "Already streaming")
+        }
+
+
+
+    }
+
+    override fun stopLinAccStreaming() {
+
+        _measuring.update { false }
+        linAccDisposable?.dispose()
+        _elevations.update {null}
+
+    }
     override fun startHrStreaming(deviceId: String) {
         val isDisposed = hrDisposable?.isDisposed ?: true
         if(isDisposed) {
@@ -146,4 +250,12 @@ class AndroidPolarController (
         hrDisposable?.dispose()
         _currentHR.update { null }
     }
+
+    // Function to apply EWMA filter with fixed alpha (0.3)
+    private fun filterEWMA(currentAngle: Double, previousOutput: Double): Double {
+        val alpha = 0.3 // Fixed alpha value (can be adjusted if needed)
+        return alpha * currentAngle + (1 - alpha) * previousOutput
+    }
+
 }
+
