@@ -51,7 +51,18 @@ fun BluetoothDataScreen(
             }
 
         }
+
         is CombinedSensorData.HrData -> combinedSensorData.hr.toString()
+        is CombinedSensorData.InternalLinAcc -> {
+            val triple = combinedSensorData.internalLinAcc
+            if (triple == null) {
+                "-"
+            } else {
+                String.format("%.1f, %.1f, %.1f", triple.first, triple.second, triple.third)
+            }
+        }
+
+        is CombinedSensorData.ExternalLinAcc -> combinedSensorData.linAcc.toString()
         else -> "-"
     }
 
@@ -68,7 +79,7 @@ fun BluetoothDataScreen(
             modifier = Modifier.weight(1f)
         ) {
             Text(
-                text = if(state.measuring) value else "-",
+                text = if (state.measuring) value else "-",
                 fontSize = if (value.length < 3) 128.sp else 54.sp,
                 color = Color.Black,
             )
@@ -77,7 +88,7 @@ fun BluetoothDataScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceAround,
             modifier = Modifier.fillMaxWidth()
-        ){
+        ) {
             Button(
                 onClick = vm::connectToSensor,
                 enabled = !state.connected,
@@ -104,7 +115,7 @@ fun BluetoothDataScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceAround,
             modifier = Modifier.fillMaxWidth()
-        ){
+        ) {
             Button(
                 onClick = vm::startHr,
                 enabled = (state.connected && !state.measuring),
@@ -126,12 +137,39 @@ fun BluetoothDataScreen(
                 Text(text = "Start\nGyro Stream")
             }
         }
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceAround,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Button(
+                onClick = vm::startExternalAcc,
+                enabled = (!state.measuring),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    disabledContainerColor = Color.Gray
+                )
+            ) {
+                Text(text = "Start\nExterAcc Stream")
+            }
+            Button(
+                onClick = vm::startInternalAcc,
+                enabled = (!state.measuring),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    disabledContainerColor = Color.Gray
+                )
+            ) {
+                Text(text = "Start\nInterAcc Stream")
+            }
+        }
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceAround,
             modifier = Modifier.fillMaxWidth()
-        ){
+        ) {
             Button(
                 onClick = vm::stopDataStream,
                 enabled = (state.measuring),

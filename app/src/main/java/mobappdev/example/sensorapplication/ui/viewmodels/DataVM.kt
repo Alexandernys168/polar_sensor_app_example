@@ -32,16 +32,26 @@ class DataVM @Inject constructor(
     private val gyroDataFlow = internalSensorController.currentGyroUI
     private val hrDataFlow = polarController.currentHR
 
+    private val linAccFlow = polarController.currentLinAcc
+    private val internalLinAccFlow = internalSensorController.currentLinAccUI
+
     // Combine the two data flows
     val combinedDataFlow= combine(
         gyroDataFlow,
         hrDataFlow,
-    ) { gyro, hr ->
+        linAccFlow,
+        internalLinAccFlow,
+    ) { gyro, hr , linAcc, internalLinAcc->
         if (hr != null ) {
             CombinedSensorData.HrData(hr)
         } else if (gyro != null) {
             CombinedSensorData.GyroData(gyro)
-        } else {
+        } else if (linAcc != null){
+            CombinedSensorData.ExternalLinAcc(linAcc)
+        } else if (internalLinAcc != null) {
+            CombinedSensorData.InternalLinAcc(internalLinAcc)
+        } else
+        {
             null
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -49,11 +59,13 @@ class DataVM @Inject constructor(
     private val _state = MutableStateFlow(DataUiState())
     val state = combine(
         polarController.hrList,
+        polarController.linAccList,
         polarController.connected,
         _state
-    ) { hrList, connected, state ->
+    ) { hrList, linAccList ,connected, state ->
         state.copy(
             hrList = hrList,
+            accList = linAccList,
             connected = connected,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), _state.value)
@@ -77,6 +89,18 @@ class DataVM @Inject constructor(
     fun disconnectFromSensor() {
         stopDataStream()
         polarController.disconnectFromDevice(_deviceId.value)
+    }
+
+    fun startExternalAcc() {
+        polarController.startLinAccStreaming(_deviceId.value)
+        streamType = StreamType.FOREIGN_ACC
+        _state.update { it.copy(measuring = true) }
+    }
+
+    fun startInternalAcc() {
+        internalSensorController.startImuStream()
+        streamType = StreamType.LOCAL_ACC
+        _state.update { it.copy(measuring = true) }
     }
 
     fun startHr() {
@@ -103,6 +127,8 @@ class DataVM @Inject constructor(
         when (streamType) {
             StreamType.LOCAL_GYRO -> internalSensorController.stopGyroStream()
             StreamType.FOREIGN_HR -> polarController.stopHrStreaming()
+            StreamType.FOREIGN_ACC -> polarController.stopLinAccStreaming()
+            StreamType.LOCAL_ACC -> internalSensorController.stopImuStream()
             else -> {} // Do nothing
         }
         _state.update { it.copy(measuring = false) }
@@ -111,15 +137,20 @@ class DataVM @Inject constructor(
 
 data class DataUiState(
     val hrList: List<Int> = emptyList(),
+    val accList: List<Triple<Int, Int, Int>> = emptyList(),
     val connected: Boolean = false,
     val measuring: Boolean = false
 )
 
 enum class StreamType {
-    LOCAL_GYRO, LOCAL_ACC, FOREIGN_HR
+    LOCAL_GYRO, LOCAL_ACC, FOREIGN_HR, FOREIGN_ACC
 }
 
 sealed class CombinedSensorData {
     data class GyroData(val gyro: Triple<Float, Float, Float>?) : CombinedSensorData()
     data class HrData(val hr: Int?) : CombinedSensorData()
+
+    data class InternalLinAcc(val internalLinAcc: Triple<Float, Float, Float>?) : CombinedSensorData()
+
+    data class ExternalLinAcc(val linAcc: Triple<Int, Int, Int>?) : CombinedSensorData()
 }
