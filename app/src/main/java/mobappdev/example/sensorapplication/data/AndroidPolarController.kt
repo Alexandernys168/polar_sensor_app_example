@@ -10,7 +10,10 @@ package mobappdev.example.sensorapplication.data
  */
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.core.content.PackageManagerCompat.LOG_TAG
 import com.polar.sdk.api.PolarBleApi
 import com.polar.sdk.api.PolarBleApiCallback
 import com.polar.sdk.api.PolarBleApiDefaultImpl
@@ -27,6 +30,12 @@ import kotlinx.coroutines.flow.update
 import mobappdev.example.sensorapplication.domain.PolarController
 import java.util.UUID
 import com.polar.sdk.api.model.*
+import java.io.File
+import java.lang.Thread.State
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import kotlin.math.*
+
 
 import kotlin.math.atan2
 
@@ -61,14 +70,29 @@ class AndroidPolarController (
 
     private val TAG = "AndroidPolarController"
 
-    private val _currentLinAccUI = MutableStateFlow<Triple<Int, Int, Int>?>(null)
-    private val currentLinAccUI: StateFlow<Triple<Int, Int, Int>?>
+    private val _currentLinAccUI = MutableStateFlow<Triple<Double, Double, Double>?>(null)
+    private val currentLinAccUI: StateFlow<Triple<Double, Double, Double>?>
         get() = _currentLinAccUI.asStateFlow()
 
-    private var _currentLinAcc= MutableStateFlow<Triple<Int,Int,Int>?>(null)
 
 
-    override val currentLinAcc: StateFlow<Triple<Int, Int, Int>?>
+    // ELEVATION --->
+
+    private var _currentElevationData= MutableStateFlow<ElevationData?>(null)
+    override val currentElevation: StateFlow<ElevationData?>
+        get() = _currentElevationData.asStateFlow()
+
+    private val _elevationList = MutableStateFlow<List<ElevationData>>(emptyList())
+
+    override val elevationList: StateFlow<List<ElevationData>>
+        get() = _elevationList.asStateFlow()
+
+
+    //////////////////
+
+    private var _currentLinAcc= MutableStateFlow<Triple<Double,Double,Double>?>(null)
+
+    override val currentLinAcc: StateFlow<Triple<Double, Double, Double>?>
         get() = _currentLinAcc.asStateFlow()
 
     private val _elevations = MutableStateFlow<List<ElevationData>?>(emptyList())
@@ -81,8 +105,8 @@ class AndroidPolarController (
         _elevations.value = newElevations
     }
 
-    private val _linAccList = MutableStateFlow<List<Triple<Int, Int, Int>>>(emptyList())
-    override val linAccList: StateFlow<List<Triple<Int,Int,Int>>>
+    private val _linAccList = MutableStateFlow<List<Triple<Double, Double, Double>>>(emptyList())
+    override val linAccList: StateFlow<List<Triple<Double,Double,Double>>>
         get() = _linAccList.asStateFlow()
 
 
@@ -156,6 +180,7 @@ class AndroidPolarController (
     }
 
 
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun startLinAccStreaming(deviceId: String) {
         val settings: MutableMap<PolarSensorSetting.SettingType, Int> = mutableMapOf()
         settings[PolarSensorSetting.SettingType.SAMPLE_RATE] = 52
@@ -180,17 +205,31 @@ class AndroidPolarController (
                     {linAccData: PolarAccelerometerData ->
                         for (sample in linAccData.samples) {
                             val angleZTan = Math.toDegrees(atan2(sample.y.toDouble(), sample.x.toDouble()))
+                            val angle = calculateElevationAngle(sample.x.toDouble(), sample.y.toDouble(), sample.z.toDouble())
 
-                            val filteredAngleZ = filterEWMA(angleZTan, zTanBefore)
+                            val filteredAngleZ = filterEWMA(angle, zTanBefore)
 
                             // Use filteredAngleZ for further processing or UI updates
-                            Log.d(TAG, "Filtered Angle Z: $filteredAngleZ + TimeStamp: ${sample.timeStamp}")
+                            val formattedTime = convertNanosToFormattedTime(sample.timeStamp)
+                            val formattedAngle = String.format("%.1f", filteredAngleZ)
+                            Log.d(TAG, "Filtered Angle Z: $formattedAngle + TimeStamp: $formattedTime")
 
                             // Update zTanBefore for the next iteration
                             zTanBefore = filteredAngleZ
 
-                            _elevations.update {
-                                it?.plus(ElevationData(angleZTan.toInt(), sample.timeStamp))
+                            _currentElevationData.update {
+                                ElevationData(filteredAngleZ, formattedTime)
+                            }
+/*
+                            _currentLinAcc.update {
+                                Triple(sample.x.toDouble(), sample.y.toDouble(), sample.z.toDouble())
+                            }
+
+ */
+
+
+                            _elevationList.update {
+                                it.plus(ElevationData(filteredAngleZ, formattedTime))
                             }
 
 
@@ -198,7 +237,7 @@ class AndroidPolarController (
 
                     },
                     {error: Throwable ->
-                        Log.e(TAG, "Acc stream failed, reaseon $error")
+                        Log.e(TAG, "Acc stream failed, reason $error")
                     },
                     {
                         Log.d(TAG, "Acc stream complete")
@@ -216,6 +255,7 @@ class AndroidPolarController (
 
         _measuring.update { false }
         linAccDisposable?.dispose()
+        writeElevationListToFile("external_elevation_data.txt")
         _elevations.update {null}
 
     }
@@ -253,8 +293,47 @@ class AndroidPolarController (
 
     // Function to apply EWMA filter with fixed alpha (0.3)
     private fun filterEWMA(currentAngle: Double, previousOutput: Double): Double {
-        val alpha = 0.3 // Fixed alpha value (can be adjusted if needed)
+        val alpha = 0.6 // Fixed alpha value (can be adjusted if needed)
         return alpha * currentAngle + (1 - alpha) * previousOutput
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    fun convertNanosToFormattedTime(nanos: Long): String {
+        val epoch = LocalDateTime.of(2000, 1, 1, 0, 0, 0, 0)
+        val seconds = nanos / 1_000_000_000
+        val nanoFraction = nanos % 1_000_000_000
+
+        val dateTime = epoch.plusSeconds(seconds).plusNanos(nanoFraction)
+
+        // Format the LocalDateTime with a tenth of a second precision
+        val formatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+        return dateTime.format(formatter)
+    }
+
+    fun calculateElevationAngle(x: Double, y: Double, z: Double): Double {
+        // Calculate the magnitude of the accelerometer data
+        val magnitude = sqrt(x.pow(2) + y.pow(2) + z.pow(2))
+
+        // Calculate the elevation angle in degrees using the magnitude
+        val elevationRadians = asin(z / magnitude) // Calculate the angle in radians
+
+        return Math.toDegrees(elevationRadians)
+    }
+
+    override fun writeElevationListToFile(fileName: String) {
+        val elevationList = _elevationList.value
+
+        val fileContent = elevationList.joinToString("\n") { elevationData ->
+            "${elevationData.elevation.toInt()}; ${elevationData.timestamp}"
+        }
+
+        try {
+            val file = File(context.filesDir, fileName)
+            file.writeText(fileContent)
+            Log.d(TAG, "Elevation list written to file: ${file.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error writing elevation list to file: ${e.message}")
+        }
     }
 
 }

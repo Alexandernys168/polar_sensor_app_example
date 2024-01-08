@@ -51,8 +51,28 @@ fun BluetoothDataScreen(
             }
 
         }
+        is CombinedSensorData.InternalElevation -> {
+            val double = combinedSensorData.internalElevation?.elevation
+            val time = combinedSensorData.internalElevation?.timestamp
+            if (double == null && time == null) {
+                "-"
+            } else {
+                String.format("%.1f", double, "timestamp: $time")
+            }
+        }
+
+        is CombinedSensorData.ExternalElevation -> {
+            val double = combinedSensorData.externalElevation?.elevation
+            val time = combinedSensorData.externalElevation?.timestamp
+            if (double == null && time == null) {
+                "-"
+            } else {
+                String.format("%.1f", double, "timestamp: $time")
+            }
+        }
 
         is CombinedSensorData.HrData -> combinedSensorData.hr.toString()
+        /*
         is CombinedSensorData.InternalLinAcc -> {
             val triple = combinedSensorData.internalLinAcc
             if (triple == null) {
@@ -62,7 +82,11 @@ fun BluetoothDataScreen(
             }
         }
 
-        is CombinedSensorData.ExternalLinAcc -> combinedSensorData.linAcc.toString()
+        is CombinedSensorData.ExternalLinAcc -> {
+            combinedSensorData.linAcc.toString()
+        }
+
+         */
         else -> "-"
     }
 
@@ -82,6 +106,13 @@ fun BluetoothDataScreen(
                 text = if (state.measuring) value else "-",
                 fontSize = if (value.length < 3) 128.sp else 54.sp,
                 color = Color.Black,
+            )
+        }
+        if (state.measuring) {
+            Text(
+                text = "Timer: ${state.timer} seconds",
+                fontSize = 24.sp,
+                color = Color.Black
             )
         }
         Row(
@@ -151,7 +182,7 @@ fun BluetoothDataScreen(
                     disabledContainerColor = Color.Gray
                 )
             ) {
-                Text(text = "Start\nExterAcc Stream")
+                Text(text = "Start\nPolar Acc")
             }
             Button(
                 onClick = vm::startInternalAcc,
@@ -161,7 +192,7 @@ fun BluetoothDataScreen(
                     disabledContainerColor = Color.Gray
                 )
             ) {
-                Text(text = "Start\nInterAcc Stream")
+                Text(text = "Start\nInter Acc")
             }
         }
 
