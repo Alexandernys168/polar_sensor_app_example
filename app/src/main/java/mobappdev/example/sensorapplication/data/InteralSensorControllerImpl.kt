@@ -32,6 +32,9 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 import java.time.Instant
 import java.io.File
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 
 private const val LOG_TAG = "Internal Sensor Controller"
@@ -41,13 +44,13 @@ class InternalSensorControllerImpl(
 ): InternalSensorController, SensorEventListener {
 
     // Expose acceleration to the UI
-    private val _currentLinAccUI = MutableStateFlow<Triple<Float, Float, Float>?>(null)
-    override val currentLinAccUI: StateFlow<Triple<Float, Float, Float>?>
+    private val _currentLinAccUI = MutableStateFlow<Triple<Double, Double, Double>?>(null)
+    override val currentLinAccUI: StateFlow<Triple<Double, Double, Double>?>
         get() = _currentLinAccUI.asStateFlow()
 
-    private var _currentLinAcc: Triple<Float,Float,Float>? = null // samma som private var _currentElevation: ElevationData? = null
+    private var _currentLinAcc: Triple<Double,Double,Double>? = null // samma som private var _currentElevation: ElevationData? = null
 
-    private var _currentGyro: Triple<Float, Float, Float>? = null
+    private var _currentGyro: Triple<Double, Double, Double>? = null
 
 
 
@@ -75,8 +78,8 @@ class InternalSensorControllerImpl(
 
 
     // Expose gyro to the UI on a certain interval
-    private val _currentGyroUI = MutableStateFlow<Triple<Float, Float, Float>?>(null)
-    override val currentGyroUI: StateFlow<Triple<Float, Float, Float>?>
+    private val _currentGyroUI = MutableStateFlow<Triple<Double, Double, Double>?>(null)
+    override val currentGyroUI: StateFlow<Triple<Double, Double, Double>?>
         get() = _currentGyroUI.asStateFlow()
 
     private val _streamingGyro = MutableStateFlow(false)
@@ -120,15 +123,20 @@ class InternalSensorControllerImpl(
                 //Log.e(TAG, "Value: $_currentLinAcc ")
                 Log.e(TAG, "Value: $_currentLinAcc ")
                 val angle = _currentLinAcc?.let { calculateElevationAngle(it.first, it.second, it.third) }
-                val filteredAngleZ = filterEWMA(angle, zTanBefore)
+
+                val filteredAngleZ = angle?.let { filterEWMA(it, zTanBefore) }
+
                 val formattedAngle = String.format("%.1f", filteredAngleZ)
                 val currentTimeStamp = Instant.now().toEpochMilli() // Current timestamp in milliseconds
+                val formattedTime = convertMillisToFormattedTime(currentTimeStamp)
 
-                Log.d(TAG, "Angle: $formattedAngle, Timestamp: $currentTimeStamp")
-                zTanBefore = filteredAngleZ
+                Log.d(TAG, "Angle: $formattedAngle, Timestamp: $formattedTime")
+                if (filteredAngleZ != null) {
+                    zTanBefore = filteredAngleZ
+                }
 
                 _currentElevationUI.update {
-                    ElevationData(filteredAngleZ, currentTimeStamp.toString())
+                    ElevationData(filteredAngleZ!!, formattedTime)
 
                 }
 
@@ -137,11 +145,11 @@ class InternalSensorControllerImpl(
 
 
                 _elevationList.update {
-                    it.plus(ElevationData(filteredAngleZ, currentTimeStamp.toString()))
+                    it.plus(ElevationData(filteredAngleZ!!, formattedTime))
                 }
 
 
-                delay(500)
+                delay(50)
             }
         }
     }
@@ -191,35 +199,41 @@ class InternalSensorControllerImpl(
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
             // Extract gyro data (angular speed around X, Y, and Z axes
-            _currentGyro = Triple(event.values[0], event.values[1], event.values[2])
+            _currentGyro = Triple(event.values[0].toDouble(), event.values[1].toDouble(), event.values[2].toDouble())
         }
         else if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-            _currentLinAcc = Triple(event.values[0], event.values[1], event.values[2])
+            _currentLinAcc = Triple(event.values[0].toDouble(), event.values[1].toDouble(), event.values[2].toDouble())
         }
     }
 
-    private fun filterEWMA(currentAngle: Float?, previousOutput: Double): Double {
+    private fun filterEWMA(currentAngle: Double, previousOutput: Double): Double {
         val alpha = 0.6 // Fixed alpha value (can be adjusted if needed)
-        return alpha * currentAngle!! + (1 - alpha) * previousOutput
+        return alpha * currentAngle + (1 - alpha) * previousOutput
     }
 
-    fun calculateElevationAngle(x: Float, y: Float, z: Float): Float {
+    fun calculateElevationAngle(x: Double, y: Double, z: Double): Double {
         // Calculate the magnitude of the accelerometer data
         val magnitude = sqrt(x.pow(2) + y.pow(2) + z.pow(2))
 
-        // Ensure the magnitude is not zero to avoid division by zero
-        if (magnitude != 0f) {
-            // Calculate the elevation angle in radians using the magnitude
-            val elevationRadians = asin(z / magnitude)
-            return Math.toDegrees(elevationRadians.toDouble()).toFloat() // Convert radians to degrees and then to float
-        }
 
-        // If magnitude is zero, return 0 degrees or any default value
-        return 0f // Or any default value you prefer for zero magnitude
+            val elevationRadians = asin(z / magnitude)
+            return Math.toDegrees(elevationRadians)
+
+
+
     }
 
     override fun onAccuracyChanged(p0: Sensor?, p1: Int) {
         // Not used in this example
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    fun convertMillisToFormattedTime(milliseconds: Long): String {
+        val instant = Instant.ofEpochMilli(milliseconds)
+        val formatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+            .withZone(ZoneId.systemDefault())
+
+        return formatter.format(instant)
     }
 
     override fun writeElevationListToFile(fileName: String) {

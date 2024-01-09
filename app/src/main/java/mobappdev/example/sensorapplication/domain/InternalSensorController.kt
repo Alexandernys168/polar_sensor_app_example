@@ -13,8 +13,8 @@ import kotlinx.coroutines.flow.StateFlow
 import mobappdev.example.sensorapplication.data.ElevationData
 
 interface InternalSensorController {
-    val currentLinAccUI: StateFlow<Triple<Float, Float, Float>?>
-    val currentGyroUI: StateFlow<Triple<Float, Float, Float>?>
+    val currentLinAccUI: StateFlow<Triple<Double, Double, Double>?>
+    val currentGyroUI: StateFlow<Triple<Double, Double, Double>?>
 
     val currentElevation: StateFlow<ElevationData?>
     val elevationList: StateFlow<List<ElevationData>>
